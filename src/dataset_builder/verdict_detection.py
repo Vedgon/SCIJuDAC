@@ -31,8 +31,8 @@ def detect_verdict_text(sentences:list[str]) -> list[str]:
 
 def find_verdict_sentence_sequence(search_indices_per_word:list[list[int]]) -> list[int]:
 	"""
-	Identifies a strictly increasing sequence of character indices--one per word--
-    by treating the list of indices as a directed acyclic graph. This is used to
+	Identifies a strictly increasing sequence of character indices (one per word) 
+	by treating the list of indices as a directed acyclic graph. This is used to 
 	find the verdict sentence in the original text.
 
 	Arguments

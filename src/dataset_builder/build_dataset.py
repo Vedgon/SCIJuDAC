@@ -27,7 +27,7 @@ def clean_text(paragraph:str) -> str:
 
 	Returns
 	-------
-	cleaned_sentences | paragraph : list[str] | str
+	paragraph : str
 		Returns a cleaned paragraph.
 	"""
 	paragraph = paragraph.lower() if isinstance(paragraph, str) else str(paragraph)
@@ -87,13 +87,14 @@ def prepare_data(filepath:Path) -> tuple[list[str], list[str]]:
 	paragraphs = []
 	judgment_data = pd.read_csv(filepath).iloc[:-1]
 
-	# Selects the range of text with verdicts based on the number of paragraphs.
+	# Sets the initial paragraph index to start verdict detection from.
 	# Guesstimated heuristic, probably not universally accurate.
-	if len(judgment_data) > 15: verdict_start_idx = 0
+	if len(judgment_data) < 10: verdict_start_idx = 3
 	elif len(judgment_data) in range(10, 16): verdict_start_idx = 5
-	else: verdict_start_idx = 3
+	else: verdict_start_idx = 0
 
 	if verdict_start_idx != 0:
+		# Adding all the paragraphs before the first suspected verdict-bearing paragraph.
 		for paragraph in judgment_data["text"][:verdict_start_idx]:
 			paragraphs.append(paragraph)
 
@@ -141,7 +142,7 @@ def main() -> None:
 			if outcome not in ["allowed", "dismissed", "partly allowed"]: continue # Disable to get all the 63k files.
 
 			paragraphs = prepare_data(file)
-			if paragraphs == None: continue # print(f"{folder}_{file}")
+			if paragraphs == None: continue
 
 			preprocessed_data["file_ID"] = f"{file.parent.name}_{file.stem}"
 			preprocessed_data["judgment"] = "\n\n".join(paragraphs)
@@ -149,7 +150,7 @@ def main() -> None:
 
 			final_data.append(preprocessed_data)
 
-	output_path = DATASET / "SCIJuDAC_test.jsonl"
+	output_path = DATASET / "SCIJuDAC.jsonl"
 	output_path.parent.mkdir(exist_ok=True)
 
 	with open(output_path, 'w') as out_file:
