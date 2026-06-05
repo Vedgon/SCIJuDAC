@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from tqdm import tqdm
 
-from config import PARAWISE_DATA, DATASET
+from config import PARAWISE_DATA, LABELLING
 from extract_outcome_label import label_extraction_from_text, label_extraction_from_outcome
 
 
@@ -70,7 +70,7 @@ def main() -> None:
 				outcomes.append((f"{file.parent.name}/{file.name}", label))
 				labels.append(label)
 
-	labels_output_path = DATASET / "outcomes_output_test.csv"
+	labels_output_path = LABELLING / "outcomes_output.csv"
 	outcomes_df = pd.DataFrame(outcomes, columns=["filepath", "label"])
 	outcomes_df.to_csv(labels_output_path, index=False)
 

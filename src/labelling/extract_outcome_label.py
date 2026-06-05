@@ -7,7 +7,6 @@ from utilities import appellate_outcome_regex
 
 stop_words = set(stopwords.words("english")) - set(["i", "my", "of"])
 
-
 def preprocess_text(judgment:pd.DataFrame) -> list[str]:
 	"""
 	Standard preprocessing pipeline
@@ -17,9 +16,6 @@ def preprocess_text(judgment:pd.DataFrame) -> list[str]:
 	---------
 	judgment : pd.DataFrame
 		Dataframe containing the judgment text.
-
-	cleaned_sentences : list[str]
-		List of final cleaned sentences containing the judgment.
 
 	Returns
 	-------
@@ -37,52 +33,13 @@ def preprocess_text(judgment:pd.DataFrame) -> list[str]:
 		paragraph = re.sub(r"pet[\.]+", "petition", paragraph)
 		paragraph = re.sub(r"no\.", "number", paragraph)
 		sentences = sent_tokenize(paragraph)
-		sentences.reverse() # To align the search to be started from the last sentence
+		sentences.reverse() # To start the search from the last sentence
 		tokenized_sentences = [word_tokenize(sentence) for sentence in sentences[:6] if len(sentence) > 2] # Exclude 2-word sentences
 		for tokenized_sentence in tokenized_sentences:
 			sentence = " ".join([token for token in tokenized_sentence if token not in string.punctuation and token not in stop_words])
 			cleaned_sentences.append(sentence)
 
 	return cleaned_sentences
-
-
-# def appellate_outcome_regex() -> re.Pattern:
-# 	"""
-# 	Creates the regular expression for finding
-# 	the sentence containing the verdicts.
-
-# 	Arguments
-# 	---------
-# 	None
-
-# 	Returns
-# 	-------
-# 	verdict_regex : re.Pattern
-# 		Regex pattern for finding the verdict sentence.
-# 	"""
-# 	appeal_pattern = r"(?:\s{0,1}appeal(?:s)?\b|\s{0,1}pet(?:ition)?(?:s)?\b|\s{0,1}app(?:lication)?(?:s)?\b)"
-
-# 	numbers_pattern = r"\s(?:\d{1,4}(?:\s\d{1,4}){0,3})"
-# 	multi_appeal_pattern = fr"""(?:appeal\snumber(?:s)?{numbers_pattern}|appeal(?:s)?{numbers_pattern}
-# 								|pet(?:ition)?\snumber(?:s)?{numbers_pattern}|pet(?:ition)?(?:s)?{numbers_pattern}
-# 								|app(?:lication)?\snumber(?:s)?{numbers_pattern}|app(?:lication)?(?:s)?{numbers_pattern})"""
-
-# 	intervening_pattern = r"(?:\s\w+){0,3}\s"
-# 	set_aside_pattern = fr"""(?:(set\saside){intervening_pattern}(?:order(?:s)?|decree(?:s)?)|
-# 							(?:(?:order(?:s)?|decree(?:s)?){intervening_pattern}(set\saside)))"""
-
-# 	allowed_pattern = r"allow(?:ed)?|succeed(?:s)?"
-# 	dismissed_pattern = r"dismiss(?:ed)?|fail(?:s)?|reject(?:ed)?"
-# 	decision_pattern = fr"({allowed_pattern}|{dismissed_pattern})"
-
-# 	appeal_before_decision_pattern = fr"{appeal_pattern}{intervening_pattern}{decision_pattern}"
-# 	decision_before_appeal_pattern = fr"{decision_pattern}{intervening_pattern}{appeal_pattern}"
-# 	multi_appeals_decision_pattern = fr"{multi_appeal_pattern}{intervening_pattern}{decision_pattern}"
-
-# 	verdict_pattern = appeal_before_decision_pattern + "|" + decision_before_appeal_pattern + "|" + multi_appeals_decision_pattern + "|" + set_aside_pattern
-# 	verdict_regex = re.compile(verdict_pattern, re.VERBOSE)
-
-# 	return verdict_regex
 
 
 def label_extraction_from_text(judgment:pd.DataFrame) -> str:
@@ -148,13 +105,13 @@ def label_extraction_from_text(judgment:pd.DataFrame) -> str:
 def label_extraction_from_outcome(text:str) -> str:
 	"""
 	Extracts the outcome label (allowed, partly allowed, disposed of, dismissed, inapplicable) 
-	from the judgment text's final line. Corrects some misspells in the data, and groups them 
+	from the judgment data's final row. Corrects some misspells in the data, and groups them 
 	within one of the four labels.
 
 	Arguments
 	---------
 	text : str
-		Judgment text.
+		Final row of the judgment.
 
 	Returns
 	-------
