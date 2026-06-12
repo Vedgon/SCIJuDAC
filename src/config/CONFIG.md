@@ -1,0 +1,1 @@
+The script contains all the pathnames for all the sub-modules of the project. The file can be imported like a package via the command `import config`. If you want to import specific paths only, use `from config import _name_`.
