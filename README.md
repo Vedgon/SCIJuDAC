@@ -6,7 +6,7 @@ This repository accompanies the paper:
 
 > **SCIJuDAC: A Fine-Grained Benchmark for Appellate Legal Judgment Prediction in the Supreme Court of India**
 
-**Authors:** Anurag Yadav, Durga Toshniwal
+<!-- **Authors:** Anurag Yadav, Durga Toshniwal -->
 
 SCIJuDAC is a large-scale benchmark dataset for the Legal Judgment Prediction (LJP) task in the Supreme Court of India (SCI). Unlike existing appellate judgment prediction benchmarks that primarily employ binary outcome labels, SCIJuDAC introduces a **fine-grained three-label framework** that captures additional nuances in appellate court decisions.
 
@@ -235,7 +235,7 @@ The framework generates:
 | LLM Fine-tuning (when trained on last 512 tokens) | ~1 day              |
 | Separability & Calibration Analysis               | ~30 minutes         |
 
-## Citation
+<!-- ## Citation
 
 If you use SCIJuDAC in your research, please cite:
 
@@ -247,7 +247,7 @@ If you use SCIJuDAC in your research, please cite:
   year={2025}
 }
 ```
-
+-->
 ## License
 
 ### Code
