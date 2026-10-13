@@ -10,7 +10,8 @@ from transformers import (
 	EarlyStoppingCallback,
 )
 
-import logging
+import logging, torch
+from typing import Literal
 
 from config import CHECKPOINTS_ROOT
 from training import (
@@ -20,6 +21,7 @@ from training import (
 	BicephalousClassifier,
 	BicephalousTrainer,
 	ComputeMetrics,
+	HierarchicalCollator,
 	LoggingCallback
 )
 
@@ -34,8 +36,8 @@ class BicephalousQwen():
 	"""
 	def __init__(self, dataset_path:Path, num_labels:int,
 				model_name:str, batch_size:int,
-				epochs:int, seed:int, collapse_labels:str,
-				load_ckpt:str
+				epochs:int, seed:int, collapse_labels:Literal["y", "n"],
+				collapse_classifier:Literal["y", "n"], load_ckpt:Literal["y", "n"]
 	):
 		"""
 		Initializes the configuration for model training. Configures the
@@ -73,14 +75,15 @@ class BicephalousQwen():
 		-------
 		None
 		"""
-		self.model_name = model_name
-		self.dataset_path = dataset_path
-		self.num_labels = num_labels
-		self.batch_size = batch_size
-		self.epochs = epochs
-		self.seed = seed
-		self.collapse_labels = collapse_labels
-		self.load_checkpoint = load_ckpt
+		self.model_name          = model_name
+		self.dataset_path        = dataset_path
+		self.num_labels          = num_labels
+		self.batch_size          = batch_size
+		self.epochs              = epochs
+		self.seed                = seed
+		self.collapse_labels     = collapse_labels
+		self.collapse_classifier = collapse_classifier
+		self.load_checkpoint     = load_ckpt
 
 
 	def train_model(self, model, tokenizer, train_dataset, valid_dataset):
@@ -110,9 +113,12 @@ class BicephalousQwen():
 		checkpoint_path = get_checkpoint_path(
 							CHECKPOINTS_ROOT, self.dataset_path,
 							self.model_name, self.collapse_labels,
-							self.load_checkpoint
+							self.collapse_classifier, self.load_checkpoint
 						)
-		data_collator = DataCollatorWithPadding(tokenizer=tokenizer, padding=True,)
+		if self.collapse_classifier == "y":
+			data_collator = DataCollatorWithPadding(tokenizer=tokenizer, padding=True,)
+		else:
+			data_collator = HierarchicalCollator(pad_token_id=tokenizer.pad_token_id)
 
 		training_args = TrainingArguments(
 			fp16=False,
@@ -157,7 +163,7 @@ class BicephalousQwen():
 			eval_dataset=valid_dataset,
 			processing_class=tokenizer,
 			data_collator=data_collator,
-			compute_metrics=ComputeMetrics(valid_dataset.with_format(None)),
+			compute_metrics=ComputeMetrics(),
 			callbacks=[EarlyStoppingCallback(early_stopping_patience=3), LoggingCallback(logger)]
 		)
 
@@ -178,7 +184,7 @@ class BicephalousQwen():
 		Loads the backbone model and the associated tokenizer from HF,
 		then our Bicephalous version of the classifier, and the dataset,
 		followed by the initiation of training. The final results are logger
-		in the logger defined in `main.py`.
+		in the logger defined in `run_training.py`.
 
 		Arguments
 		---------
@@ -195,16 +201,17 @@ class BicephalousQwen():
 
 		config = BicephalousConfig(
 			backbone_name=self.model_name,
+			torch_dtype=torch.bfloat16,
 			num_labels=self.num_labels,
 			num_coarse_labels=2,
 			num_fine_labels=2 if self.num_labels==3 else 0,
-			enable_qunatization=True
+			enable_qunatization=True,
+			collapse_classifier=self.collapse_classifier
 		)
 
 		peft_backbone = BicephalousClassifier.load_backbone(config, tokenizer)
 		model = BicephalousClassifier(config=config, backbone=peft_backbone)
 		model.to(peft_backbone.device)
-
 		model.config.pad_token_id = tokenizer.pad_token_id
 		model.gradient_checkpointing_enable()
 
