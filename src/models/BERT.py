@@ -1,5 +1,14 @@
 """
 Model configuration for the BERT-based models.
+There are a few notable differences between this model's
+class layout and the rest, namely loading the backbone
+here directly and disabling quantization and PEFT.
+While the latter is (hopefully) self-explanatory,
+the former is a design choice the author is still
+unsure about. Maybe a later version will see him making
+up his mind about it.
+To be noted: That _does_ not impact the functionality
+in any way.
 """
 import sys
 from pathlib import Path
@@ -20,6 +29,7 @@ from config import CHECKPOINTS_ROOT
 from training import (
 	load_and_tokenize_data,
 	get_checkpoint_path,
+	BicephalousConfig,
 	BicephalousClassifier,
 	BicephalousTrainer,
 	ComputeMetrics,
@@ -39,7 +49,7 @@ class BicephalousBERT():
 				self, model_name:str, dataset_path:Path,
 				num_labels:int, batch_size:int,
 				epochs:int, seed:int, collapse_labels:Literal["y", "n"],
-				load_ckpt:Literal["y", "n"]
+				collapse_classifier:Literal["y", "n"],load_ckpt:Literal["y", "n"]
 		):
 		"""
 		Initializes the configuration for model training. Configures the
@@ -77,14 +87,15 @@ class BicephalousBERT():
 		-------
 		None
 		"""
-		self.model_name = model_name
-		self.dataset_path = dataset_path
-		self.num_labels = num_labels
-		self.batch_size = batch_size
-		self.epochs = epochs
-		self.seed = seed
-		self.collapse_labels = collapse_labels
-		self.load_checkpoint = load_ckpt
+		self.model_name          = model_name
+		self.dataset_path        = dataset_path
+		self.num_labels          = num_labels
+		self.batch_size          = batch_size
+		self.epochs              = epochs
+		self.seed                = seed
+		self.collapse_labels     = collapse_labels
+		self.collapse_classifier = collapse_classifier
+		self.load_checkpoint     = load_ckpt
 
 
 	def train_model(self,
@@ -119,7 +130,7 @@ class BicephalousBERT():
 		checkpoint_path = get_checkpoint_path(
 							CHECKPOINTS_ROOT, self.dataset_path,
 							self.model_name, self.collapse_labels,
-							self.load_checkpoint
+							self.collapse_classifier, self.load_checkpoint
 						)
 		device = torch.device('cuda') if torch.cuda.is_available() else 'cpu'
 		model.to(device)
@@ -144,7 +155,7 @@ class BicephalousBERT():
 			logging_strategy="steps",
 			logging_steps=300,
 
-			evaluation_strategy="steps",
+			eval_strategy="steps",
 			eval_steps=1000,
 
 			output_dir=checkpoint_path,
@@ -164,7 +175,7 @@ class BicephalousBERT():
 			train_dataset=train_dataset,
 			eval_dataset=valid_dataset,
 			tokenizer=tokenizer,
-			compute_metrics=ComputeMetrics(valid_dataset.with_format(None)),
+			compute_metrics=ComputeMetrics(),
 			callbacks=[EarlyStoppingCallback(early_stopping_patience=3), LoggingCallback(logger)]
 		)
 
@@ -183,9 +194,9 @@ class BicephalousBERT():
 		Method to initialize our bicephalous BERT model, load the dataset,
 		and execute training.
 		Loads the backbone model and the associated tokenizer from HF,
-		then our Bicephalous version of the classifier, and the dataset,
+		then our Bicephalous version of the classifier and the dataset,
 		followed by the initiation of training. The final results are logger
-		in the logger defined in `main.py`.
+		in the logger defined in `run_training.py`.
 
 		Arguments
 		---------
@@ -195,8 +206,17 @@ class BicephalousBERT():
 		-------
 		None
 		"""
-		encoder = AutoModel.from_pretrained(self.model_name)
-		model = BicephalousClassifier(encoder, self.num_labels)
+		config = BicephalousConfig(
+			backbone_name=self.model_name,
+			torch_dtype="float32",
+			num_labels=self.num_labels,
+			num_coarse_labels=2,
+			num_fine_labels=2 if self.num_labels==3 else 0,
+			enable_quantization=False,
+			collapse_classifier=self.collapse_classifier
+		)
+		backbone = AutoModel.from_pretrained(self.model_name)
+		model = BicephalousClassifier(config=config, backbone=backbone)
 		tokenizer = AutoTokenizer.from_pretrained(self.model_name)
 		model.gradient_checkpointing_enable()
 
@@ -204,7 +224,7 @@ class BicephalousBERT():
 
 		trainer = self.train_model(model, tokenizer, train_dataset, valid_dataset)
 		predictions = trainer.predict(test_dataset)
-		metrics = ComputeMetrics(test_dataset)(predictions)
+		metrics = ComputeMetrics()(predictions)
 
 		logger.info("For test dataset:")
 		for key, metric in metrics.items():
