@@ -94,8 +94,8 @@ class ComputeWeightsAndLosses():
 		---------
 		outputs : dict[str, Tensor]
 			Model outputs containing the keys:
-			- ``coarse_logits`` : shape `(batch_size, 2)`
-			- ``fine_logits`` : shape `(batch_size, 2)` or ``None``
+			- `coarse_logits` : shape `(batch_size, 2)`
+			- `fine_logits`   : shape `(batch_size, 2)` or `None`
 
 		coarse_label : Tensor
 			Coarse-grained target labels.
@@ -161,7 +161,8 @@ class BicephalousConfig(PretrainedConfig):
 	def __init__(
 			self, backbone_name:str|None=None, num_labels:int=0,
 			num_coarse_labels:int=0, num_fine_labels:int=0,
-			enable_quantization:bool=True, **kwargs
+			enable_quantization:bool=True,
+			collapse_classifier:str="n", **kwargs
 		) -> None:
 		"""
 		Initializes the model configuration.
@@ -194,6 +195,7 @@ class BicephalousConfig(PretrainedConfig):
 		self.num_coarse_labels = num_coarse_labels
 		self.num_fine_labels = num_fine_labels
 		self.enable_quantization = enable_quantization
+		self.collapse_classifier = collapse_classifier
 
 
 class BicephalousClassifier(PreTrainedModel):
@@ -238,16 +240,22 @@ class BicephalousClassifier(PreTrainedModel):
 		self.hidden_size = self.backbone.config.hidden_size
 		self.dropout = nn.Dropout(0.1)
 		self.num_labels = config.num_labels
-		self.coarse_head = nn.Linear(self.hidden_size, config.num_coarse_labels)
-		self.fine_head = nn.Linear(self.hidden_size, config.num_fine_labels) if config.num_fine_labels > 0 else None
+		self.collapse_classifier = config.collapse_classifier
+
+		if self.collapse_classifier == "y":
+			self.flat_head = nn.Linear(self.hidden_size, config.num_labels)
+			self.coarse_head = None
+			self.fine_head = None
+
+		else:
+			self.coarse_head = nn.Linear(self.hidden_size, config.num_coarse_labels)
+			self.fine_head = nn.Linear(self.hidden_size, config.num_fine_labels) if config.num_fine_labels > 0 else None
 
 		self.post_init()
 
 
 	@classmethod
-	def load_backbone(
-		cls, config:BicephalousConfig, tokenizer:PreTrainedTokenizerBase
-	) -> PreTrainedModel:
+	def load_backbone(cls, config:BicephalousConfig, tokenizer:PreTrainedTokenizerBase) -> PreTrainedModel:
 		"""
 		Loads and configures the transformer backbone.
 
@@ -274,7 +282,6 @@ class BicephalousClassifier(PreTrainedModel):
 			config.backbone_name,
 			quantization_config=bnb_config,
 			attn_implementation="sdpa",
-			dtype=torch.bfloat16,
 			device_map="auto",
 			trust_remote_code=True,
 		)
@@ -288,35 +295,6 @@ class BicephalousClassifier(PreTrainedModel):
 			backbone = get_peft_model(backbone, peft_config)
 
 		return backbone
-
-
-	# @classmethod
-	# def load_from_checkpoint(cls, ckpt_path:Path): # TODO Investigate whether this is even being used or not.
-	# 	"""
-	# 	Loads a saved model checkpoint.
-
-	# 	Restores the model configuration, tokenizer, backbone, and model
-	# 	weights from the specified checkpoint directory.
-
-	# 	Arguments
-	# 	---------
-	# 	ckpt_path : Path
-	# 		Path to the checkpoint directory.
-
-	# 	Returns
-	# 	-------
-	# 	model, tokenizer : tuple[BicephalousClassifier, PreTrainedTokenizerBase]
-	# 		Loaded model and associated tokenizer.
-	# 	"""
-	# 	config = BicephalousConfig.from_pretrained(ckpt_path)
-	# 	tokenizer = AutoTokenizer.from_pretrained(ckpt_path)
-	# 	backbone = cls.load_backbone(config, tokenizer)
-	# 	model = cls(config, backbone)
-
-	# 	state_dict = torch.load(f"{ckpt_path}/pytorch_model.bin", map_location="cpu")
-	# 	model.load_state_dict(state_dict, strict=False)
-
-	# 	return model, tokenizer
 
 
 	def gradient_checkpointing_enable(self) -> None:
@@ -383,19 +361,28 @@ class BicephalousClassifier(PreTrainedModel):
 
 		last_hidden = outputs.last_hidden_state
 		seq_lengths = attention_mask.sum(dim=1) - 1
-		cls_emb = last_hidden[ # TODO: Make this clearer.
-			torch.arange(last_hidden.size(0), device=last_hidden.device),
-			seq_lengths
-		]  # NOT [CLS] in the strictest sense. Named for convenience.
-		cls_dropout = self.dropout(cls_emb)
-		coarse_logits = self.coarse_head(cls_dropout)
-		fine_logits = self.fine_head(cls_dropout) if self.fine_head is not None else None
+		batch_indices = torch.arange(last_hidden.size(0), device=last_hidden.device)
+		# Select the hidden state of the last non-padding token in each sequence.
+		last_layer_emb = last_hidden[batch_indices, seq_lengths]
+		last_layer_emb_dropout = self.dropout(last_layer_emb)
 
-		return {
-			"coarse_logits": coarse_logits,
-			"fine_logits": fine_logits,
-			"cls_emb": cls_emb if output_hidden_states else None
-		}
+		if self.collapse_classifier == "y":
+			logits = self.flat_head(last_layer_emb_dropout)
+
+			return {
+				"logits": logits,
+				"last_layer_emb": last_layer_emb if output_hidden_states else None
+			}
+
+		else:
+			coarse_logits = self.coarse_head(last_layer_emb_dropout)
+			fine_logits = self.fine_head(last_layer_emb_dropout) if self.fine_head is not None else None
+
+			return {
+				"coarse_logits": coarse_logits,
+				"fine_logits": fine_logits,
+				"last_layer_emb": last_layer_emb if output_hidden_states else None
+			}
 
 
 class BicephalousTrainer(Trainer):
@@ -491,26 +478,37 @@ class BicephalousTrainer(Trainer):
 		outputs : dict
 			Model outputs. Returned when `return_outputs=True`.
 		"""
-		coarse_label = inputs.pop("coarse_label").to(self.device)
-		fine_label = inputs.pop("fine_label")
-		outcomes = inputs.pop("labels").to(self.device)
-		outputs = model(**inputs)
+		if model.collapse_classifier == "y":
+			labels = inputs.pop("labels").to(self.device)
 
-		# print(f"Coarse weights: {self.coarse_weights}\nFine weights: {self.fine_weights}")
-		total_loss, coarse_loss, fine_loss = ComputeWeightsAndLosses.compute_loss(
-			outputs=outputs,
-			coarse_label=coarse_label,
-			fine_label=fine_label,
-			lam=self.lam,
-			coarse_weights=self.coarse_weights,
-			fine_weights=self.fine_weights
-		)
+			inputs.pop("coarse_label", None)
+			inputs.pop("fine_label", None)
 
-		if self.state.global_step % self.args.logging_steps == 0:
-			self._last_coarse_loss = coarse_loss.detach().item()
-			self._last_fine_loss = fine_loss.detach().item()
+			outputs = model(**inputs)
+			loss = F.cross_entropy(outputs["logits"], labels)
 
-		return (total_loss, outputs) if return_outputs else total_loss
+			return (loss, outputs) if return_outputs else loss
+
+		else:
+			coarse_label = inputs.pop("coarse_label").to(self.device)
+			fine_label = inputs.pop("fine_label").to(self.device)
+			inputs.pop("labels")
+			outputs = model(**inputs)
+
+			total_loss, coarse_loss, fine_loss = ComputeWeightsAndLosses.compute_loss(
+				outputs=outputs,
+				coarse_label=coarse_label,
+				fine_label=fine_label,
+				lam=self.lam,
+				coarse_weights=self.coarse_weights,
+				fine_weights=self.fine_weights
+			)
+
+			if self.state.global_step % self.args.logging_steps == 0:
+				self._last_coarse_loss = coarse_loss.detach().item()
+				self._last_fine_loss = fine_loss.detach().item()
+
+			return (total_loss, outputs) if return_outputs else total_loss
 
 
 	def prediction_step(
@@ -553,36 +551,42 @@ class BicephalousTrainer(Trainer):
 			else v.to(self.device)
 			for k, v in inputs.items()
 		}
-		coarse_label = inputs.pop("coarse_label", None).to(self.device)
-		fine_label = inputs.pop("fine_label", None).to(self.device)
+		inputs.pop("coarse_label", None)
+		inputs.pop("fine_label", None)
 		labels = inputs.pop("labels", None).to(self.device)
 
 		with torch.no_grad():
 			outputs = model(**inputs)
-			coarse_logits = outputs["coarse_logits"]
-			fine_logits = outputs["fine_logits"]
 
-			coarse_prob = torch.softmax(coarse_logits, dim=-1)
-			if model.num_labels == 3:
-				"""
-				For three-class classification, final probabilities are reconstructed
-				as:
-				- P(dismissed) = P(coarse=negative)
-				- P(allowed) = P(coarse=positive) * P(fine=allowed)
-				- P(partly_allowed) = P(coarse=positive) * P(fine=partly_allowed)
-
-				This produces a probability distribution over the original label
-				space.
-				"""
-				fine_prob = torch.softmax(fine_logits, dim=-1)
-				final_probs = torch.zeros(coarse_logits.size(0), 3, device=self.device)
-
-				# Schema defined in `load_data.py`
-				final_probs[:, 0] = coarse_prob[:,0] 				  # dismissed
-				final_probs[:, 1] = coarse_prob[:,1] * fine_prob[:,1] # allowed
-				final_probs[:, 2] = coarse_prob[:,1] * fine_prob[:,0] # partly allowed
+			if model.collapse_classifier == "y":
+				probs = torch.softmax(outputs["logits"], dim=-1)
+				return (None, probs, labels)
 
 			else:
-				final_probs = coarse_prob
+				coarse_logits = outputs["coarse_logits"]
+				fine_logits = outputs["fine_logits"]
 
-		return (None, final_probs, labels)
+				coarse_prob = torch.softmax(coarse_logits, dim=-1)
+				if model.num_labels == 3:
+					"""
+					For three-class classification, final probabilities are reconstructed
+					as:
+					- P(dismissed) = P(coarse=negative)
+					- P(allowed) = P(coarse=positive) * P(fine=allowed)
+					- P(partly_allowed) = P(coarse=positive) * P(fine=partly_allowed)
+
+					This produces a probability distribution over the original label
+					space.
+					"""
+					fine_prob = torch.softmax(fine_logits, dim=-1)
+					final_probs = torch.zeros(coarse_logits.size(0), 3, device=self.device)
+
+					# Schema defined in `load_data.py`
+					final_probs[:, 0] = coarse_prob[:,0] 				  # dismissed
+					final_probs[:, 1] = coarse_prob[:,1] * fine_prob[:,1] # allowed
+					final_probs[:, 2] = coarse_prob[:,1] * fine_prob[:,0] # partly allowed
+
+				else:
+					final_probs = coarse_prob
+
+				return (None, final_probs, labels)
