@@ -23,8 +23,8 @@ class LoggingCallback(TrainerCallback):
 	and evaluation metrics.
 
 	Logs coarse- and fine-grained classification losses during training,
-	as well as evaluation metrics such as macro F1, weighted F1, and
-	accuracy during validation.
+	as well as evaluation metrics (accuracy, macro F1, and weighted F1)
+	during validation.
 	"""
 	def __init__(self, logger):
 		"""
@@ -77,12 +77,12 @@ class LoggingCallback(TrainerCallback):
 
 		if "loss" in logs:
 			self.logger.info(f"Total loss: {logs['loss']}")
+
+		if "coarse_loss" in logs:
 			self.logger.info(f"Coarse loss: {logs['coarse_loss']}")
 			self.logger.info(f"Fine loss: {logs['fine_loss']}")
 
 		if "eval_f1_macro" in logs:
-			self.logger.info(f"Coarse loss: {logs['coarse_loss']}")
-			self.logger.info(f"Fine loss: {logs['fine_loss']}")
 			self.logger.info(f"Eval MF1: {logs['eval_f1_macro']}")
 			self.logger.info(f"Eval WF1: {logs['eval_f1_weighted']}")
 			self.logger.info(f"Eval accuracy: {logs['eval_accuracy']}")
