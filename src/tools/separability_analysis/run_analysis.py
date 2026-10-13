@@ -220,6 +220,10 @@ def main() -> None:
 	args = initiate_parser()
 	logger = create_logger(args)
 
+	if args.load_cc_ckpt == "y" and args.load_lc_ckpt == "y":
+		logger.error("Can't load both ablation checkpoints at the same time. Program exiting...")
+		exit()
+
 	if args.dataset in ["ILDC_single", "ILDC_multi"] or args.load_lc_ckpt == "y": num_labels = 2
 	else: num_labels = 3
 
