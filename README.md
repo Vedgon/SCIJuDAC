@@ -39,20 +39,27 @@ To answer this question, we introduce a refined labeling scheme that captures ad
 Judgments were collected from publicly available Supreme Court of India decisions available through:
 
 https://www.courtkutchehry.com/
-
+vg. doc. length (in words) 4
+Largest and smallest doc. length 388,993, 51
+Avg. # of tokens (GPT4) 
+Largest and smallest token count 461,421, 56
 ### Dataset Statistics
 
-| Property             | Value                                  |
-| -------------------- | -------------------------------------- |
-| Jurisdiction         | Supreme Court of India                 |
-| Case Type            | Appellate Judgments                    |
-| Time Span            | January 1950 – June 2025               |
-| Total Judgments      | 53,584                                 |
-| Labels               | 3 (allowed, dismissed, partly allowed) |
-| Task                 | Legal Judgment Prediction              |
-| Mean character count | 17528.70                               |
-| Mean word count      | 2948.97                                |
-| Mean token count     | 3780.25                                |
+| Property                | Value                                  |
+| ----------------------- | -------------------------------------- |
+| Jurisdiction            | Supreme Court of India                 |
+| Case Type               | Appellate Judgments                    |
+| Time Span               | January 1950 – June 2025               |
+| Total Judgments         | 54,006                                 |
+| Labels                  | 3 (allowed, dismissed, partly allowed) |
+| Task                    | Legal Judgment Prediction              |
+| Mean word count         | 2970.62                                |
+| Std. dev. of word count | 4770.17                                |
+| Mean token count (GPT4) | 3807.99                                |
+| Largest word count      | 3,88,993                               |
+| Smallest word count     | 51                                     |
+| Largest token count     | 4,61,421                               |
+| Smallest token count    | 56                                     |
 
 ### Preprocessing
 
@@ -61,7 +68,7 @@ The dataset construction pipeline includes:
 * Collection of appellate judgments.
 * Dataset cleaning and normalization.
 * Removal of verdict information from document text to prevent label leakage.
-* Generation of benchmark-ready training, validation, and test splits.
+* Extraction of final verdict from the verdict information
 
 ## Models Evaluated
 
@@ -91,30 +98,13 @@ The dataset construction pipeline includes:
 ### Separability Metrics
 
 * Silhouette Score
+* Davies Bouldin Index (DBI)
 * Top-2 Logit Margin Score
 
 ### Calibration Metrics
 
 * Brier Score
 * Expected Calibration Error (ECE)
-
-## Main Findings
-
-### Classification Performance
-
-* SCIJuDAC achieves performance comparable to ILDC on BERT, Llama, Qwen, LegalBERT, and InLegalBERT models.
-* Performance is generally slightly lower on SCIJuDAC, indicating increased task difficulty.
-* Macro-level metrics exhibit a more noticeable decline, suggesting greater challenges in modeling minority or nuanced classes.
-* Mistral and Saul exhibit comparatively weaker and less stable performance.
-
-### Separability and Calibration Analysis
-
-* SCIJuDAC produces worse separability scores than ILDC, indicating more difficult class boundaries.
-* SCIJuDAC exhibits worse Brier and Silhouette scores.
-* Expected Calibration Error and logit margin analyses reveal different confidence characteristics across models.
-* Llama and Qwen remain comparatively stable across benchmarks.
-* LegalBERT remains competitive despite increased dataset complexity.
-* Mistral and Saul continue to show unstable behavior under fine-grained labeling.
 
 ## Repository Structure
 
@@ -165,19 +155,22 @@ pip install -r requirements.txt
 
 ## Training
 
-Run model training from the `src/models/` directory:
+Run model training from the `src/models/` directory in the command line. Change parameters to select different model/dataset:
 
 ```bash
-python main.py \
+python run_training.py \
     --name test \
     --model bert \
     --dataset SCIJuDAC \
     --batch_size 16 \
     --epochs 3 \
     --seed 42 \
-    --collapse_labels n \
     --load_ckpt n
+    --collapse_labels n \
+    --collapse_classifier n \
 ```
+Replace the value after `--model` parameter with one of these: `bert`, `legalbert`, `inlegalbert`, `llama`, `qwen`, `mistral`, `saul` to select a model. Replace the value after `--dataset` parameter with one of these: `ILDC_single`, `ILDC_multi`, `SCIJuDAC` to select a dataset. Tune the model's batch size, training epochs, or initial seed with the given parameters. Toggle label collapse or classifier collapse ablations with the `--collapse_labels` or `--collapse_classifier` parameters.
+Note: Only one ablation will be allowed at a time.
 
 ### Configuration
 
@@ -189,10 +182,20 @@ src/config/
 
 ## Separability and Calibration Analysis
 
-Run analysis using checkpoints stored in the `checkpoints/` directory.
+Run analysis using checkpoints stored in the `checkpoints/` directory. Works the same as the training execution command, with the `--load_cc_ckpt` and `--load_cl_ckpt` used to load the collapsed classifier and collapsed labels ablation checkpoints respectively.
+Note: Only one checkpoint will be loaded at a time.
 
 ```bash
 python run_analysis.py
+    --name test \
+    --model bert \
+    --dataset SCIJuDAC \
+    --batch_size 16 \
+    --epochs 3 \
+    --seed 42 \
+    --load_ckpt n
+    --collapse_labels n \
+    --collapse_classifier n \
 ```
 
 Analysis outputs are stored in:
@@ -205,12 +208,12 @@ logs/analysis/
 
 The framework generates:
 
-* Training logs
-* Validation and test results
+* Training, validation, and test result logs
 * Model checkpoints
 * Classification metrics
 * Separability analysis reports
 * Calibration analysis reports
+* UMAPs and confusion matrices for all runs
 
 ## Reproducibility
 
