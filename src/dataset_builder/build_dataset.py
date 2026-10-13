@@ -10,7 +10,7 @@ import string
 import pandas as pd
 from tqdm import tqdm
 
-from config import LABELLING, PARAWISE_DATA, DATASET
+from config import LABELLING, LABELLED_JUDGMENTS, DATASET
 from verdict_detection import detect_verdict_text, remove_verdict
 
 stop_words = set(stopwords.words("english")) - set(["i", "my", "of"])
@@ -27,7 +27,7 @@ def clean_text(paragraph:str) -> str:
 
 	Returns
 	-------
-	paragraph : str
+	cleaned_sentences | paragraph : list[str] | str
 		Returns a cleaned paragraph.
 	"""
 	paragraph = paragraph.lower() if isinstance(paragraph, str) else str(paragraph)
@@ -85,20 +85,21 @@ def prepare_data(filepath:Path) -> tuple[list[str], list[str]]:
 		an empty list if labels unavailable or in case of error.
 	"""
 	paragraphs = []
+	labels = []
 	judgment_data = pd.read_csv(filepath).iloc[:-1]
 
-	# Sets the initial paragraph index to start verdict detection from.
+	# Selects the range of text with verdicts based on the number of paragraphs.
 	# Guesstimated heuristic, probably not universally accurate.
-	if len(judgment_data) < 10: verdict_start_idx = 3
+	if len(judgment_data) > 15: verdict_start_idx = 0
 	elif len(judgment_data) in range(10, 16): verdict_start_idx = 5
-	else: verdict_start_idx = 0
+	else: verdict_start_idx = 3
 
 	if verdict_start_idx != 0:
-		# Adding all the paragraphs before the first suspected verdict-bearing paragraph.
-		for paragraph in judgment_data["text"][:verdict_start_idx]:
+		for label, paragraph, _ in judgment_data[:verdict_start_idx].itertuples(index=False):
 			paragraphs.append(paragraph)
+			labels.append(label)
 
-	for paragraph in judgment_data["text"][verdict_start_idx:-1]:
+	for paragraph, label, _ in judgment_data[verdict_start_idx:-1].itertuples(index=False):
 		new_paragraph = ""
 		cleaned_paragraph = clean_text(paragraph)
 		tokenized_paragraph = tokenize_text(cleaned_paragraph)
@@ -108,13 +109,16 @@ def prepare_data(filepath:Path) -> tuple[list[str], list[str]]:
 		if verdict_sentence:
 			new_paragraph = remove_verdict(filepath, cleaned_paragraph, verdict_sentence)
 			# print(f"Paragraph after verdict removal: {new_paragraph}")
-			if len(new_paragraph) > 1: paragraphs.append(new_paragraph)
+			if len(new_paragraph) > 1:
+				paragraphs.append(new_paragraph)
+				labels.append(label)
 			elif new_paragraph == "": return
 
 		else:
 			paragraphs.append(str(paragraph))
+			labels.append(label)
 
-	return paragraphs
+	return paragraphs, labels
 
 
 def main() -> None:
@@ -123,7 +127,7 @@ def main() -> None:
 	Offers choice of processing data with and without labels (stored separately).
 	Skips judgments without a relevant outcome.
 	"""
-	parawise_data_root = PARAWISE_DATA
+	parawise_data_root = LABELLED_JUDGMENTS
 
 	folders = sorted(folder for folder in parawise_data_root.iterdir() if folder.is_dir())
 	outcomes_filepath = LABELLING / "outcomes_output.csv"
@@ -131,7 +135,7 @@ def main() -> None:
 	final_data = []
 
 	for folder in tqdm(folders, position=0, desc="Processing data"):
-		# if folder.name not in ["1950"]: continue
+		# if folder.name not in ["1967"]: continue
 		files = sorted(file for file in folder.iterdir() if file.is_file())
 
 		for file in tqdm(files, position=1, leave=False, desc=folder.name):
@@ -141,16 +145,20 @@ def main() -> None:
 			outcome = outcomes.loc[outcomes["filepath"] == key]["label"].squeeze()
 			if outcome not in ["allowed", "dismissed", "partly allowed"]: continue # Disable to get all the 63k files.
 
-			paragraphs = prepare_data(file)
-			if paragraphs == None: continue
+			paragraphs, labels = prepare_data(file)
+			if paragraphs == None or len(paragraphs) != len(labels):
+				print(f"Label/paragraph missing for {folder}_{file}. Skipping ...")
+				continue
 
 			preprocessed_data["file_ID"] = f"{file.parent.name}_{file.stem}"
-			preprocessed_data["judgment"] = "\n\n".join(paragraphs)
+			preprocessed_data["judgment"] = [
+				{"text": paragraph, "label": label}
+				for paragraph, label in zip(paragraphs, labels)]
 			preprocessed_data["outcome"] = outcome
 
 			final_data.append(preprocessed_data)
 
-	output_path = DATASET / "SCIJuDAC.jsonl"
+	output_path = DATASET / "RheLaINLeg.jsonl"
 	output_path.parent.mkdir(exist_ok=True)
 
 	with open(output_path, 'w') as out_file:
