@@ -11,7 +11,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from config import PARAWISE_DATA, LABELLING
-from extract_outcome_label import label_extraction_from_text, label_extraction_from_outcome
+from extract_outcome_label import label_extraction_from_text, label_extraction_from_ck
 
 
 def plot_label_dist(labels:list[str]) -> None:
@@ -49,10 +49,12 @@ def main() -> None:
 	Gets all the judgment texts and extracts outcome labels from it 
 	via two label_extraction functions. Also plots distribution of labels.
 	"""
-	judgment_data_root = PARAWISE_DATA
+	judgment_data_root = Path("/home/anurag/Code/RheLaINLeg/data/interim/parawise_data") # PARAWISE_DATA
 	folders = sorted(folder for folder in judgment_data_root.iterdir() if folder.is_dir())
 	labels = []
 	outcomes = []
+	ck_file_list = {"allowed": [], "dismissed": [], "partly allowed": [], "disposed of": [], "inapplicable": []}
+	ck_counter = {"allowed": 0, "dismissed": 0, "partly allowed": 0, "disposed of": 0, "inapplicable": 0}
 
 	for folder in tqdm(folders):
 		# if folder.name != "1950": continue
@@ -65,11 +67,16 @@ def main() -> None:
 				decision = judgment_text.loc[judgment_text.index[-1], "text"]
 
 				label = label_extraction_from_text(judgment_text)
-				if label == "": label = label_extraction_from_outcome(decision)
+				if label == "":
+					label = label_extraction_from_ck(decision)
+					ck_counter[label] += 1
+					ck_file_list[label].append(f"{folder.name}_{file.stem}")
 
-				outcomes.append((f"{file.parent.name}/{file.name}", label))
+				outcomes.append((f"{file.parent.stem}_{file.name}", label))
 				labels.append(label)
 
+	print(ck_counter)
+	print("Total number of outcomes taken from the outcome given in CK source:", sum(ck_counter.values()))
 	labels_output_path = LABELLING / "outcomes_output.csv"
 	outcomes_df = pd.DataFrame(outcomes, columns=["filepath", "label"])
 	outcomes_df.to_csv(labels_output_path, index=False)
