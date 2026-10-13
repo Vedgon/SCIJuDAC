@@ -6,7 +6,6 @@ The final prediction for a file is obtained by applying
 import numpy as np
 from sklearn.metrics import accuracy_score, recall_score, f1_score
 
-from datasets import Dataset
 from transformers import EvalPrediction
 
 class ComputeMetrics():
@@ -23,7 +22,7 @@ class ComputeMetrics():
 	- Macro F1
 	- Weighted F1
 	"""
-	def __init__(self, data:Dataset):
+	def __init__(self):
 		"""
 		Initializes the metric computation object.
 
@@ -32,7 +31,7 @@ class ComputeMetrics():
 		data : Dataset
 			Test dataset containing file identifiers.
 		"""
-		self.file_ids = data["file_id"]
+		pass
 
 
 	def __call__(self, eval_pred:EvalPrediction|tuple) -> dict[str, float]:
