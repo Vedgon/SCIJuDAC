@@ -12,7 +12,7 @@ from transformers import (
 	TrainingArguments,
 	EarlyStoppingCallback,
 )
-import logging, os
+import logging, os, torch
 from typing import Literal
 from datasets import Dataset
 from dotenv import load_dotenv
@@ -42,7 +42,7 @@ class BicephalousLlama():
 			self, model_name:str, dataset_path:Path,
 			num_labels:int, batch_size:int,
 			epochs:int, seed:int, collapse_labels:Literal["y", "n"],
-			load_ckpt:Literal["y", "n"]
+			collapse_classifier:Literal["y", "n"], load_ckpt:Literal["y", "n"]
 		):
 		"""
 		Initializes the configuration for model training. Configures the
@@ -80,25 +80,26 @@ class BicephalousLlama():
 		-------
 		None
 		"""
-		self.model_name = model_name
-		self.dataset_path = dataset_path
-		self.num_labels = num_labels
-		self.batch_size = batch_size
-		self.epochs = epochs
-		self.seed = seed
-		self.collapse_labels = collapse_labels
-		self.load_checkpoint = load_ckpt
+		self.model_name          = model_name
+		self.dataset_path        = dataset_path
+		self.num_labels          = num_labels
+		self.batch_size          = batch_size
+		self.epochs              = epochs
+		self.seed                = seed
+		self.collapse_labels     = collapse_labels
+		self.collapse_classifier = collapse_classifier
+		self.load_checkpoint     = load_ckpt
 
 		load_dotenv()
 		self.HF_token = os.environ["HF_TOKEN"]
 
 
 	def train_model(self,
-		model:BicephalousClassifier,
-		tokenizer:AutoTokenizer,
-		train_dataset:Dataset,
-		valid_dataset:Dataset,
-	) -> BicephalousTrainer:
+					model:BicephalousClassifier,
+					tokenizer:AutoTokenizer,
+					train_dataset:Dataset,
+					valid_dataset:Dataset,
+		) -> BicephalousTrainer:
 		"""
 		Method to set up the model and trainer configurations,
 		to load the checkpoint, and to train the model.
@@ -125,10 +126,13 @@ class BicephalousLlama():
 		checkpoint_path = get_checkpoint_path(
 							CHECKPOINTS_ROOT, self.dataset_path,
 							self.model_name, self.collapse_labels,
-							self.load_checkpoint
+							self.collapse_classifier, self.load_checkpoint
 						)
-		# data_collator = DataCollatorWithPadding(tokenizer=tokenizer, padding=True,)
-		data_collator = HierarchicalCollator(pad_token_id=tokenizer.pad_token_id)
+
+		if self.collapse_classifier == "y":
+			data_collator = DataCollatorWithPadding(tokenizer=tokenizer, padding=True,)
+		else:
+			data_collator = HierarchicalCollator(pad_token_id=tokenizer.pad_token_id)
 
 		training_args = TrainingArguments(
 			fp16=False,
@@ -173,7 +177,7 @@ class BicephalousLlama():
 			eval_dataset=valid_dataset,
 			processing_class=tokenizer,
 			data_collator=data_collator,
-			compute_metrics=ComputeMetrics(valid_dataset.with_format(None)),
+			compute_metrics=ComputeMetrics(),
 			callbacks=[EarlyStoppingCallback(early_stopping_patience=3), LoggingCallback(logger)]
 		)
 
@@ -192,9 +196,9 @@ class BicephalousLlama():
 		Method to initialize our bicephalous Llama model, load the dataset,
 		and execute training.
 		Loads the backbone model and the associated tokenizer from HF,
-		then our Bicephalous version of the classifier, and the dataset,
+		then our Bicephalous version of the classifier and the dataset,
 		followed by the initiation of training. The final results are logger
-		in the logger defined in `main.py`.
+		in the logger defined in `run_training.py`.
 
 		Arguments
 		---------
@@ -211,16 +215,17 @@ class BicephalousLlama():
 
 		config = BicephalousConfig(
 			backbone_name=self.model_name,
+			torch_dtype=torch.bfloat16,
 			num_labels=self.num_labels,
 			num_coarse_labels=2,
 			num_fine_labels=2 if self.num_labels==3 else 0,
 			enable_qunatization=True,
+			collapse_classifier=self.collapse_classifier
 		)
 
 		peft_backbone = BicephalousClassifier.load_backbone(config, tokenizer)
 		model = BicephalousClassifier(config=config, backbone=peft_backbone)
 		model.to(peft_backbone.device)
-
 		model.config.pad_token_id = tokenizer.pad_token_id
 		model.gradient_checkpointing_enable()
 
