@@ -113,6 +113,10 @@ def main():
 		"saul"       : {"cls": BicephalousMistral, "model_name": "Equall/Saul-7B-Base"},
 	}
 
+	if args.load_cc_ckpt == "y" and args.load_lc_ckpt == "y":
+		logger.error("Can't perform both ablations at the same time. Program exiting...")
+		exit()
+
 	model_class = model_choices[args.model]["cls"]
 	model_name = model_choices[args.model]["model_name"]
 
