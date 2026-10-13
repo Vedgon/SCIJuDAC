@@ -2,15 +2,13 @@
 Fetches the path of the latest checkpoint of the model/the
 root directory where the model checkpoints will be stored.
 """
-from typing import TYPE_CHECKING, Literal
 from pathlib import Path
-if TYPE_CHECKING:
-	from pathlib import Path
 
 def get_checkpoint_path(
 		checkpoint_root:Path, dataset_path:Path, model_name:str,
-		collapse_labels:Literal["y", "n"]="n",
-		choice:Literal["y", "n"]="n"
+		collapse_labels:str="n",
+		collapse_classifier:str="n",
+		choice:str="n"
 	) -> Path:
 	"""
 	Returns the path of the latest checkpoint of the model if
@@ -45,7 +43,9 @@ def get_checkpoint_path(
 	"""
 	dataset_name = dataset_path.stem
 	model = model_name.split("/")[-1]
-	if collapse_labels=="y": checkpoint_output_path = checkpoint_root / dataset_name / "ablation" / model
+
+	if collapse_labels=="y": checkpoint_output_path = checkpoint_root / dataset_name / "ablation" / "collapsed_labels" / model
+	elif collapse_classifier=="y": checkpoint_output_path = checkpoint_root / dataset_name / "ablation" / "collapsed_classifier" / model
 	else: checkpoint_output_path = checkpoint_root / dataset_name / "exp" / model
 	checkpoint_output_path.mkdir(parents=True, exist_ok=True)
 
