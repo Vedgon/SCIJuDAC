@@ -6,9 +6,14 @@ casting the text labels to numbers, and mapping
 the labels for fine-grained classification for
 SCIJuDAC.
 """
-from datasets import load_dataset, Dataset, DatasetDict, ClassLabel
+from datasets import (
+	load_dataset,
+	Dataset,
+	DatasetDict,
+	ClassLabel
+)
 from transformers import PreTrainedTokenizerBase
-from collections import defaultdict
+
 
 def merge_labels(
 		batch:Dataset
@@ -59,7 +64,7 @@ def cast_labels(self, dataset:Dataset) -> Dataset:
 		dataset = dataset.map(merge_labels,
 			desc="Merging allowed and partly_allowed", batched=True
 		)
-		self.num_labels = 2
+		self.num_labels = 2 # Hack-ey. Doesn't change the original Namespace.
 	else:
 		outcome_labels = ["dismissed", "allowed", "partly allowed"]
 
@@ -77,9 +82,9 @@ def derive_hierarchical_labels(
 	"""
 	Derives the labels in terms of coarse and fine labels.
 	Populates the `fine` list only when the number of labels is 3
-	and the outcome label is 1 or 2. Fills the `fine` list with
-	a dummy value (-100) otherwise. The returned dict is added
-	as columns for each row.
+	and the outcome label is 1 (allowed) or 2 (partly allowed).
+	Fills the `fine` list with a dummy value (-100) otherwise.
+	The returned dict is added as columns for each row.
 
 	Arguments
 	---------
@@ -113,7 +118,10 @@ def derive_hierarchical_labels(
 				coarse.append(1)
 				fine.append(-100)
 
-	return {"coarse_label": coarse, "fine_label": fine}
+	return {
+		"coarse_label": coarse,
+		"fine_label": fine
+	}
 
 
 def create_input_ids(
@@ -148,8 +156,8 @@ def create_input_ids(
 	)
 
 	outputs["coarse_label"] = [batch["coarse_label"][i] for i in range(len(outputs["input_ids"]))]
-	outputs["fine_label"] = [batch["fine_label"][i] for i in range(len(outputs["input_ids"]))]
-	outputs["labels"] = [batch["outcome"][i] for i in range(len(outputs["input_ids"]))]
+	outputs["fine_label"]   = [batch["fine_label"][i] for i in range(len(outputs["input_ids"]))]
+	outputs["labels"]       = [batch["outcome"][i] for i in range(len(outputs["input_ids"]))]
 
 	return outputs
 
@@ -158,6 +166,7 @@ def load_and_tokenize_data(self, tokenizer:PreTrainedTokenizerBase) -> tuple[Dat
 	"""
 	Loads the dataset from the disk, splits it into train, validation, and test
 	sets, and tokenizes it via the model's tokenizer.
+
 	Arguments
 	---------
 	self : Namespace object of instance attributes for the calling model.
@@ -178,7 +187,7 @@ def load_and_tokenize_data(self, tokenizer:PreTrainedTokenizerBase) -> tuple[Dat
 		Test split of the dataset.
 	"""
 	dataset = load_dataset("json", data_files=str(self.dataset_path), split="train", download_mode="force_redownload")
-	# dataset = dataset.select(range(40))
+	# dataset = dataset.select(range(400)) # Kept to select a subset while prototyping/debugging.
 
 	dataset = cast_labels(self, dataset)
 	dataset = dataset.map(
@@ -190,7 +199,6 @@ def load_and_tokenize_data(self, tokenizer:PreTrainedTokenizerBase) -> tuple[Dat
 	)
 
 	dataset.select_columns(["file_ID", "judgment", "outcome", "coarse_label", "fine_label"])
-	# print(dataset["fine_label"])
 
 	dataset = dataset.train_test_split(test_size=0.3, seed=self.seed)
 	val_test_dataset = dataset["test"].train_test_split(test_size=0.66, seed=self.seed)
@@ -218,6 +226,5 @@ def load_and_tokenize_data(self, tokenizer:PreTrainedTokenizerBase) -> tuple[Dat
 	train_dataset = tokenized_dataset["train"]
 	valid_dataset = tokenized_dataset["valid"]
 	test_dataset = tokenized_dataset["test"]
-	# print(train_dataset[0])
 
 	return train_dataset, valid_dataset, test_dataset
