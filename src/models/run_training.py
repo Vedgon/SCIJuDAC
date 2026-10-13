@@ -9,7 +9,7 @@ sys.path.append(str(src_path))
 
 import argparse, logging, time
 
-from config import DATASET, LOGS_ROOT, COLLAPSED_LABELS_LOGS
+from config import DATASET, LOGS_ROOT, COLLAPSED_LABELS_LOGS, COLLAPSED_CLASSIFIER_LOGS
 from BERT import BicephalousBERT
 from llama import BicephalousLlama
 from qwen import BicephalousQwen
@@ -39,21 +39,23 @@ def initiate_parser() -> argparse.Namespace:
 	parser.add_argument('--batch_size', type=int, default=16, help="Batch size for training.")
 	parser.add_argument('--epochs', type=int, default=3, help="Maximum number of epochs to train for.")
 	parser.add_argument('--seed', type=int, default=42, help="Seed for training.")
+	parser.add_argument('--load_ckpt', type=str, default="n", choices=["y", "n"], help="Whether to load a saved checkpoint or not.")
+	# Ablation-specific flags:
 	parser.add_argument('--collapse_labels', type=str, default="n", choices=["y", "n"], help="Whether to collapse `allowed` and `partly allowed` labels into a single `allowed`.")
-	parser.add_argument('--load_ckpt', type=str, default="n", choices=["y", "n"], help="Whether to load checkpoint or not.")
+	parser.add_argument('--collapse_classifier', type=str, default="n", choices=["y", "n"], help="Whether to collapse the hierarchical classifier to a flat classifier.")
 	args = parser.parse_args()
 
 	return args
 
 
-def create_logger(args):
+def create_logger(args:argparse.Namespace):
 	"""
 	Creates the experiment logger object to log the training process.
 	Picks different log folders as roots based on different parser arguments.
 	Log filename format: `name_modelName_datasetName_currentDate.log`
-	Folders: If args.dataset == `ILDC`	   -> `ILDC`
-			 If args.dataset == `SCIJuDAC` -> `SCIJuDAC`
-			 If args.collapse_labels == `y` -> `collapsed_labels`
+	Folders: If args.dataset == ILDC      -> ILDC
+			 If args.dataset == SCIJuDAC  -> SCIJuDAC
+			 If args.collapse_labels == y -> collapsed_labels
 
 	Arguments
 	---------
@@ -73,7 +75,9 @@ def create_logger(args):
 	log_folders = {"ILDC_single": "ILDC", "ILDC_multi": "ILDC", "SCIJuDAC": "SCIJuDAC"}
 	log_folder = f"{log_folders[args.dataset]}"
 	filename = f"{args.name}_{args.model}_{args.dataset}_{current_date}.log"
+
 	if args.collapse_labels == "y": log_filepath = COLLAPSED_LABELS_LOGS / filename
+	elif args.collapse_classifier == "y": log_filepath = COLLAPSED_CLASSIFIER_LOGS / filename
 	else: log_filepath = LOGS_ROOT / log_folder / filename
 	log_filepath.parent.mkdir(parents=True, exist_ok=True)
 
@@ -100,8 +104,8 @@ def main():
 	logger = create_logger(args)
 
 	model_choices = {
-		"bert":        {"cls": BicephalousBERT,    "model_name": "google-bert/bert-base-uncased"},
-		"legalbert":   {"cls": BicephalousBERT,    "model_name": "nlpaueb/legal-bert-base-uncased"},
+		"bert"       : {"cls": BicephalousBERT,    "model_name": "google-bert/bert-base-uncased"},
+		"legalbert"  : {"cls": BicephalousBERT,    "model_name": "nlpaueb/legal-bert-base-uncased"},
 		"inlegalbert": {"cls": BicephalousBERT,    "model_name": "law-ai/InLegalBERT"},
 		"llama"      : {"cls": BicephalousLlama,   "model_name": "meta-llama/Llama-3.1-8B"},
 		"qwen"       : {"cls": BicephalousQwen,    "model_name": "Qwen/Qwen2.5-7B"},
@@ -131,6 +135,7 @@ def main():
 		epochs=args.epochs,
 		seed=args.seed,
 		collapse_labels=args.collapse_labels,
+		collapse_classifier=args.collapse_classifier,
 		load_ckpt=args.load_ckpt
 	)
 
